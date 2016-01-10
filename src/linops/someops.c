@@ -1,10 +1,10 @@
 /* Copyright 2014. The Regents of the University of California.
- * Copyright 2015. Martin Uecker.
+ * Copyright 2015-2016. Martin Uecker.
  * All rights reserved. Use of this source code is governed by
  * a BSD-style license which can be found in the LICENSE file.
  *
  * Authors: 
- * 2014-2015 Martin Uecker <martin.uecker@med.uni-goettingen.de>
+ * 2014-2016 Martin Uecker <martin.uecker@med.uni-goettingen.de>
  * 2014 Jonathan Tamir <jtamir@eecs.berkeley.edu>
  */
 
@@ -22,7 +22,7 @@
 #include "num/conv.h"
 #include "num/ops.h"
 #include "num/iovec.h"
-#include "num/lapack.h"
+#include "num/blas.h"
 
 #include "linops/linop.h"
 
@@ -226,8 +226,6 @@ struct operator_matrix_s {
 	unsigned int K;
 	unsigned int T_dim;
 	unsigned int T;
-
-
 };
 
 
@@ -265,7 +263,6 @@ static bool cgemm_forward_standard(const struct operator_matrix_s* data)
 	//debug_printf(DP_DEBUG1, "use_cgemm = %d, dsum = %d, csum = %d\n", use_cgemm, dsum, csum);
 
 	return use_cgemm;
-
 }
 
 
@@ -280,12 +277,19 @@ static void linop_matrix_apply(const void* _data, complex float* dst, const comp
 
 	// FIXME check all the cases where computation can be done with blas
 	
-	if ( cgemm_forward_standard(data) ) {
+	if (cgemm_forward_standard(data)) {
+
 		long L = md_calc_size(data->T_dim, data->domain_iovec->dims);
-		cgemm_sameplace('N', 'T', L, data->T, data->K, &(complex float){1.}, (const complex float (*) [])src, L, (const complex float (*) [])data->mat, data->T, &(complex float){0.}, (complex float (*) [])dst, L);
-	}
-	else
+
+		blas_cgemm('N', 'T', L, data->T, data->K, 1.,
+				(const complex float (*)[])src, L,
+				(const complex float (*)[])data->mat,
+				data->T, 0., (complex float (*)[])dst, L);
+
+	} else {
+
 		md_zfmac2(N, data->max_dims, data->codomain_iovec->strs, dst, data->domain_iovec->strs, src, data->mat_iovec->strs, data->mat);
+	}
 }
 
 static void linop_matrix_apply_adjoint(const void* _data, complex float* dst, const complex float* src)
@@ -299,12 +303,19 @@ static void linop_matrix_apply_adjoint(const void* _data, complex float* dst, co
 
 	// FIXME check all the cases where computation can be done with blas
 	
-	if ( cgemm_forward_standard(data) ) {
+	if (cgemm_forward_standard(data)) {
+
 		long L = md_calc_size(data->T_dim, data->domain_iovec->dims);
-		cgemm_sameplace('N', 'N', L, data->K, data->T, &(complex float){1.}, (const complex float (*) [])src, L, (const complex float (*) [])data->mat_conj, data->T, &(complex float){0.}, (complex float (*) [])dst, L);
-	}
-	else
+
+		blas_cgemm('N', 'N', L, data->K, data->T, 1.,
+				(const complex float (*)[])src, L,
+				(const complex float (*)[])data->mat_conj,
+				data->T, 0., (complex float (*)[])dst, L);
+
+	} else {
+
 		md_zfmacc2(N, data->max_dims, data->domain_iovec->strs, dst, data->codomain_iovec->strs, src, data->mat_iovec->strs, data->mat);
+	}
 }
 
 static void linop_matrix_apply_normal(const void* _data, complex float* dst, const complex float* src)
@@ -315,7 +326,8 @@ static void linop_matrix_apply_normal(const void* _data, complex float* dst, con
 	// FIXME check all the cases where computation can be done with blas
 	
 	//debug_printf(DP_DEBUG1, "compute normal\n");
-	if ( cgemm_forward_standard(data) ) {
+	if (cgemm_forward_standard(data)) {
+
 		long max_dims_gram[N];
 		md_copy_dims(N, max_dims_gram, data->domain_iovec->dims);
 		max_dims_gram[data->T_dim] = data->K;
@@ -333,10 +345,15 @@ static void linop_matrix_apply_normal(const void* _data, complex float* dst, con
 		md_transpose(N, data->T_dim, data->K_dim, data->domain_iovec->dims, dst, tmp_dims, tmp, CFL_SIZE);
 
 		md_free(tmp);
-	}
-	else {
+
+	} else {
+
 		long L = md_calc_size(data->T_dim, data->domain_iovec->dims);
-		cgemm_sameplace('N', 'T', L, data->K, data->K, &(complex float){1.}, (const complex float (*) [])src, L, (const complex float (*) [])data->mat_gram, data->K, &(complex float){0.}, (complex float (*) [])dst, L);
+
+		blas_cgemm('N', 'T', L, data->K, data->K, 1.,
+				(const complex float (*)[])src, L,
+				(const complex float (*)[])data->mat_gram,
+				data->K, 0., (complex float (*)[])dst, L);
 	}
 
 }
