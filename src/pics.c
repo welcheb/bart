@@ -1,10 +1,10 @@
 /* Copyright 2013-2015. The Regents of the University of California.
- * Copyright 2015. Martin Uecker.
+ * Copyright 2015-2016. Martin Uecker.
  * All rights reserved. Use of this source code is governed by
  * a BSD-style license which can be found in the LICENSE file.
  *
  * Authors:
- * 2012-2015 Martin Uecker <martin.uecker@med.uni-goettingen.de>
+ * 2012-2016 Martin Uecker <martin.uecker@med.uni-goettingen.de>
  * 2014-2015 Frank Ong <frankong@berkeley.edu>
  * 2014-2015 Jonathan Tamir <jtamir@eecs.berkeley.edu>
  *
@@ -79,14 +79,35 @@ static void help_reg(void)
 
 
 static
-const struct linop_s* sense_nc_init(const long max_dims[DIMS], const long map_dims[DIMS], const complex float* maps, const long ksp_dims[DIMS], const long traj_dims[DIMS], const complex float* traj, struct nufft_conf_s conf, _Bool use_gpu)
+const struct linop_s* sense_nc_init(const long max_dims[DIMS], const long map_dims[DIMS], const complex float* maps, const long ksp_dims[DIMS], const long traj_dims[DIMS], const complex float* traj, struct nufft_conf_s conf, bool use_gpu, bool low_mem)
 {
 	long coilim_dims[DIMS];
-	long img_dims[DIMS];
 	md_select_dims(DIMS, ~MAPS_FLAG, coilim_dims, max_dims);
+
+	struct linop_s* fft_op = NULL;
+
+	if (!low_mem) {
+
+		fft_op = nufft_create(DIMS, ksp_dims, coilim_dims, traj_dims, traj, NULL, conf, use_gpu);
+
+	} else {
+
+		long cim1_dims[DIMS];
+		md_select_dims(DIMS, FFT_FLAGS, cim1_dims, coilim_dims);
+
+		long ksp1_dims[DIMS];
+		md_select_dims(DIMS, FFT_FLAGS, ksp1_dims, ksp_dims);
+
+		long loop_dims[DIMS];
+		md_select_dims(DIMS, ~FFT_FLAGS, loop_dims, coilim_dims);
+
+		fft_op = nufft_create(DIMS, ksp1_dims, cim1_dims, traj_dims, traj, NULL, conf, use_gpu);
+		fft_op = linop_loop(DIMS, loop_dims, fft_op);
+	}
+
+	long img_dims[DIMS];
 	md_select_dims(DIMS, ~COIL_FLAG, img_dims, max_dims);
 
-	const struct linop_s* fft_op = nufft_create(DIMS, ksp_dims, coilim_dims, traj_dims, traj, NULL, conf, use_gpu);
 	const struct linop_s* maps_op = maps2_create(coilim_dims, map_dims, img_dims, maps, use_gpu);
 
 	const struct linop_s* lop = linop_chain(maps_op, fft_op);
@@ -246,6 +267,7 @@ int main_pics(int argc, char* argv[])
 	// Read input options
 	struct nufft_conf_s nuconf = nufft_conf_defaults;
 	nuconf.toeplitz = false;
+	bool low_mem = false;
 
 	float restrict_fov = -1.;
 	const char* pat_file = NULL;
@@ -301,7 +323,8 @@ int main_pics(int argc, char* argv[])
 		OPT_FLOAT('f', &restrict_fov, "rfov", "restrict FOV"),
 		OPT_SELECT('m', enum algo_t, &ropts.algo, ADMM, "(select ADMM)"),
 		OPT_FLOAT('w', &scaling, "val", "scaling"),
-		OPT_SET('S', &scale_im, "Re-scale the image after reconstruction"),
+		OPT_SET('S', &scale_im, "re-scale the image after reconstruction"),
+		OPT_SET('L', &low_mem, "use low-memory mode"),
 	};
 
 	cmdline(&argc, argv, 3, 3, usage_str, help_str, ARRAY_SIZE(opts), opts);
@@ -425,7 +448,7 @@ int main_pics(int argc, char* argv[])
 	if (NULL == traj_file)
 		forward_op = sense_init(max_dims, FFT_FLAGS|COIL_FLAG|MAPS_FLAG, maps, use_gpu);
 	else
-		forward_op = sense_nc_init(max_dims, map_dims, maps, ksp_dims, traj_dims, traj, nuconf, use_gpu);
+		forward_op = sense_nc_init(max_dims, map_dims, maps, ksp_dims, traj_dims, traj, nuconf, use_gpu, low_mem);
 
 	// apply scaling
 
