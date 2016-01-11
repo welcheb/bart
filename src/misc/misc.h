@@ -20,6 +20,9 @@
 #define MAKE_ARRAY(x, ...) ((__typeof__(x)[]){ x, __VA_ARGS__ })
 #define ARRAY_SIZE(x)	(sizeof(x) / sizeof(x[0]))
 
+#define _PTR_ALLOC(x, y)	x* y = xmalloc(sizeof(x))
+#define PTR_ALLOC(x, y)		_PTR_ALLOC(__typeof__(x), y)
+
 #ifdef __cplusplus
 extern "C" {
 #ifndef __VLA
